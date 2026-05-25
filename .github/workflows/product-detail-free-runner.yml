@@ -13,6 +13,9 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    concurrency:
+      group: product-detail-free-runner
+      cancel-in-progress: false
     timeout-minutes: 360
     steps:
       - name: Checkout private runner code
