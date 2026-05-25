@@ -112,12 +112,12 @@ jobs:
                 ts: .threadTs,
                 thread_ts: .threadTs,
                 user: "cloud",
-                text: ("[free-runner-d288635] " + .productOrder + " 실제상품 상세페이지 영문화")
+                text: ("[free-runner-9f5011c] " + .productOrder + " 실제상품 상세페이지 영문화")
               },
               product: {
                 productOrder: .productOrder,
                 targetLanguage: "English",
-                mode: "free-runner-d288635"
+                mode: "free-runner-9f5011c"
               }
             }
           ' <<< "$next")"
