@@ -1,0 +1,74 @@
+name: product-detail-free-runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: JSON payload for product-detail cloud dispatch
+        required: true
+  repository_dispatch:
+    types:
+      - product_detail_free_runner
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout private runner code
+        uses: actions/checkout@v4
+        with:
+          repository: NachunBae2/alibaba-dot-com-AIOS
+          ref: codex/product-detail-cloud-service
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: cloud
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install runtime tools
+        working-directory: cloud
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y rclone imagemagick ffmpeg zip unzip jq
+          npm ci
+          npm install -g @openai/codex god-tibo-imagen @google/gemini-cli
+          python3 -m pip install --user pillow
+          codex --version || true
+          gti --help >/dev/null
+
+      - name: Write payload
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_PAYLOAD: ${{ inputs.payload || '{}' }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            printf '%s' "$MANUAL_PAYLOAD" | jq '{client_payload: .}' > /tmp/product-detail-payload.json
+          else
+            printf '%s' "$CLIENT_PAYLOAD" | jq '{client_payload: .}' > /tmp/product-detail-payload.json
+          fi
+          jq '{client_payload: {agent: .client_payload.agent, event: {channel: .client_payload.event.channel, thread_ts: (.client_payload.event.thread_ts // .client_payload.event.ts), ts: .client_payload.event.ts}, product: .client_payload.product}}' /tmp/product-detail-payload.json
+
+      - name: Run product detail cloud dispatch
+        working-directory: cloud
+        env:
+          CODEX_AUTH_JSON_B64: ${{ secrets.CODEX_AUTH_JSON_B64 }}
+          CODEX_CONFIG_TOML_B64: ${{ secrets.CODEX_CONFIG_TOML_B64 }}
+          RCLONE_CONFIG_B64: ${{ secrets.RCLONE_CONFIG_B64 }}
+          SLACK_BOT_TOKEN_DESIGN_LEADER: ${{ secrets.SLACK_BOT_TOKEN_DESIGN_LEADER }}
+          SLACK_BOT_TOKEN_PRODUCT_DETAIL_LOCALIZER: ${{ secrets.SLACK_BOT_TOKEN_PRODUCT_DETAIL_LOCALIZER }}
+          PRODUCT_DETAIL_DRIVE_REMOTE: ${{ secrets.PRODUCT_DETAIL_DRIVE_REMOTE }}
+          HARNESS_DESIGN_LEADER_USER_ID: ${{ secrets.HARNESS_DESIGN_LEADER_USER_ID }}
+          HARNESS_PRODUCT_DETAIL_LOCALIZER_USER_ID: ${{ secrets.HARNESS_PRODUCT_DETAIL_LOCALIZER_USER_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: node scripts/run-product-detail-cloud-dispatch.mjs /tmp/product-detail-payload.json
