@@ -10,6 +10,10 @@ on:
     types:
       - product_detail_free_runner
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -75,3 +79,50 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: node scripts/run-product-detail-cloud-dispatch.mjs /tmp/product-detail-payload.json
+
+      - name: Dispatch next product
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHAIN_LEDGER_B64: ${{ secrets.PRODUCT_DETAIL_CHAIN_LEDGER_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CHAIN_LEDGER_B64:-}" ]; then
+            echo "PRODUCT_DETAIL_CHAIN_LEDGER_B64 is empty; skip chaining."
+            exit 0
+          fi
+          printf '%s' "$CHAIN_LEDGER_B64" | base64 -d > /tmp/product-detail-chain-ledger.json
+          current="$(jq -r '.client_payload.product.productOrder' /tmp/product-detail-payload.json)"
+          channel="$(jq -r '.client_payload.event.channel' /tmp/product-detail-payload.json)"
+          index="$(jq --arg current "$current" -r '.threads | map(.productOrder) | index($current)' /tmp/product-detail-chain-ledger.json)"
+          if [ "$index" = "null" ]; then
+            echo "Current product not found in chain ledger: $current"
+            exit 0
+          fi
+          next="$(jq -c --argjson index "$index" '.threads[$index + 1] // empty' /tmp/product-detail-chain-ledger.json)"
+          if [ -z "$next" ]; then
+            echo "Chain complete after $current."
+            exit 0
+          fi
+          payload="$(jq -c --arg channel "$channel" '
+            {
+              agent: "product-detail-localizer",
+              event: {
+                channel: $channel,
+                ts: .threadTs,
+                thread_ts: .threadTs,
+                user: "cloud",
+                text: ("[free-runner-d288635] " + .productOrder + " 실제상품 상세페이지 영문화")
+              },
+              product: {
+                productOrder: .productOrder,
+                targetLanguage: "English",
+                mode: "free-runner-d288635"
+              }
+            }
+          ' <<< "$next")"
+          echo "Dispatching next product after $current: $(jq -r '.product.productOrder' <<< "$payload")"
+          gh workflow run product-detail-free-runner.yml \
+            --repo NachunBae2/product-detail-free-runner \
+            --ref main \
+            -f payload="$payload"
